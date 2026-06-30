@@ -4,6 +4,7 @@
 
 # data artifacts (本地生成)
 data/chroma/
+data/mem0_chroma/
 data/checkpoints.sqlite
 data/memory_store.json
 
