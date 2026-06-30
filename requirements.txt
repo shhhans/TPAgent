@@ -1,18 +1,16 @@
-# ---- 核心（最小可运行集合）----
+# ---- 核心 ----
 langgraph>=0.2.0
 langchain-core>=0.3.0
 openai>=1.40.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 streamlit>=1.30.0
+websockets>=14,<16          # 兼容 langgraph-sdk
 
-# ---- 可选增强（不装则自动降级）----
-# 本地向量库（不装 -> 关键词检索）
-chromadb>=0.5.0
-# 长期记忆（不装 -> 本地 JSON 存储）
-mem0ai>=0.1.0
-# 多语言本地 embedding（EMBEDDING_BACKEND=sentence_transformers 时需要）
-# sentence-transformers>=3.0.0
+# ---- 长期记忆 (MEMORY_BACKEND=mem0, 默认)；不装则自动降级本地 JSON ----
+mem0ai>=2.0.0
+chromadb>=1.0.0             # 本地向量库 (RAG + mem0 共用)
+sentence-transformers>=3.0.0  # 本地 embedding (mem0 + 可选 RAG)
 
-# ---- SQLite checkpointer（CHECKPOINTER=sqlite 时需要）----
-# langgraph-checkpoint-sqlite>=2.0.0
+# 安装提示：若系统自带 PyYAML 导致 pip 卸载失败，用：
+#   pip install --ignore-installed PyYAML -r requirements.txt

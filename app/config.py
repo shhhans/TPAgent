@@ -27,8 +27,12 @@ class Settings(BaseSettings):
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
 
     # ---- 长期记忆 ----
-    memory_backend: str = "json"  # mem0 | json
+    memory_backend: str = "mem0"  # mem0 | json(无依赖降级)
     memory_json_path: str = "./data/memory_store.json"
+    # mem0 内部记忆操作用的 LLM（需支持 json_object；M2 的 think 标签由代码剥离）
+    mem0_llm_model: str = "MiniMax-M2"
+    mem0_vector_path: str = "./data/mem0_chroma"
+    mem0_collection: str = "mem0_memories"
 
     # ---- 短期记忆 / Checkpointer ----
     checkpointer: str = "memory"  # memory | sqlite

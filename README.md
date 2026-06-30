@@ -25,11 +25,14 @@ Triage 分诊路由 + Supervisor 调度 + Worker1（RAG + 参数收集）+ HITL 
 ## 快速开始
 
 ```bash
-# 1) 安装依赖（最小可运行集合；chromadb/mem0ai 为可选增强）
+# 1) 安装依赖（默认含 mem0 + 本地向量库 + 本地 embedding）
 pip install -r requirements.txt
+#   若系统自带 PyYAML 导致卸载失败：
+#   pip install --ignore-installed PyYAML -r requirements.txt
 
 # 2) 配置（环境变量已有 MINIMAX_API_KEY 则可跳过；否则复制并填写）
 cp .env.example .env
+#   想免重依赖快速跑通可在 .env 设 MEMORY_BACKEND=json、VECTOR_BACKEND=keyword
 
 # 3a) 命令行烟测
 python -m app.cli

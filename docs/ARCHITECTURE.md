@@ -204,15 +204,29 @@ Supervisor 自身**无业务 API**，只做"交警"。子 Agent 若返回 `{"sta
 ### 8.1 短期（Thread-Level）
 LangGraph Checkpointer 持久化单次会话的 `messages` + `collected_params`。会话结束清理上下文，但参数已固化前不丢。
 
-### 8.2 长期（Mem0，v1 上）
-- **写入**：会话空闲（约 20~40s）后**异步**触发"记忆固化 Worker"：用 LLM 把多轮历史清洗压缩成高纯度事实（如"偏好 DDP 条款""目的港 Dubai""上次询 Elevator_X"），交 Mem0 做 LLM-based CRUD（自动合并/覆盖旧记忆）。
-- **读取**：Triage 阶段 `mem_search(customer_id)` 召回偏好/历史参数，注入 `State.customer_memory` 与 Prompt，复访秒级唤起上下文。
-- **分类**（Mem0 内以 metadata 区分，不引入第二套系统）：
-  - 语义记忆：客户偏好、固定参数（电压制式、贸易条款偏好）
-  - 情景记忆：关键历史节点（人工接管、清关延误纠纷）—— v1 以事实条目记录；若后续需要强时序"前因后果"溯源，再评估引入 Zep 时序图谱。
-- **程序记忆**：风险对冲规范、合规流程 —— **不进 Mem0**，作为静态系统级 Prompt/RAG 每次注入（不可被对话篡改）。
+### 8.2 长期（Mem0，v1 已落地）
+- **写入**：会话结束（设计上为空闲 20~40s 异步）触发"记忆固化"：Mem0 用 LLM 把多轮历史清洗压缩成高纯度事实，做 LLM-based CRUD（自动合并/覆盖旧记忆）。
+- **读取**：Triage 入口前的 `load_memory` 节点 `mem_search(customer_id)` 召回，注入 `State.customer_memory` 与 Prompt，复访即唤起上下文。
+- **程序记忆**：风险对冲规范、合规流程 —— **不进 Mem0**，作为静态系统级 Prompt 每次注入（`PROCEDURAL_RULES`，不可被对话篡改）。
+- **情景记忆**：关键历史节点（人工接管、清关纠纷）v1 以事实条目记录；强时序"前因后果"溯源需求出现后再评估引入 Zep。
 
 > 决策记录：v1 **只用 Mem0 一套**长期记忆；Zep（时序图谱）列入后期可选，避免开局背两套数据一致性 + 故障面。
+
+#### Mem0 接入实现要点（`app/memory/mem0_store.py`）
+全本地化，不依赖外部 embedding API：
+
+| 组件 | 选型 | 说明 |
+|---|---|---|
+| 记忆抽取 LLM | MiniMax（`mem0` 原生 `minimax` provider，默认 `MiniMax-M2`） | 需支持 `json_object`；`MiniMax-M2` 是推理模型会输出 `<think>`，已对 mem0 的 `MiniMaxLLM._parse_response` **打补丁剥离 think**，否则会破坏 mem0 的 JSON 解析 |
+| Embedding | 本地 `sentence-transformers`（`huggingface` provider，多语言 MiniLM，384 维） | 首次运行从 HF Hub 下载模型；无需 embedding API |
+| 向量库 | 本地 **Chroma**（持久化到 `data/mem0_chroma`） | 与 RAG 同栈 |
+| 定制 | `custom_instructions` | 保留客户原文语言、聚焦贸易条款/机电参数/采购对象/关键事件 |
+
+注意点（已踩坑修正）：
+- MiniMax 的 embeddings 接口**非 OpenAI 兼容**（需 GroupId + 私有协议），故 embedding 走本地模型。
+- mem0 2.x 的 `get_all` 必须用 `filters={"user_id": ...}`，不能用顶层 `user_id=`。
+- 任一环节异常 → `search()` 返回空记忆、`finalize()` 降级本地 JSON，**不阻断主流程**。
+- 切回无依赖模式：`.env` 设 `MEMORY_BACKEND=json` 即可。
 
 ---
 

@@ -81,6 +81,28 @@ def _json_finalize(customer_id: str, messages: list[dict[str, str]]) -> dict:
 
 # ====================== Mem0 实现（best-effort）======================
 _mem0 = None
+_mem0_patched = False
+
+
+def _patch_mem0_minimax_think() -> None:
+    """给 mem0 的 MiniMax provider 打补丁：剥离 <think>…</think>，否则推理模型输出会破坏 mem0 的 JSON 解析。"""
+    global _mem0_patched
+    if _mem0_patched:
+        return
+    import re as _re
+
+    from mem0.llms.minimax import MiniMaxLLM
+
+    _orig = MiniMaxLLM._parse_response
+
+    def _patched(self, response, tools):
+        out = _orig(self, response, tools)
+        if isinstance(out, str):
+            return _re.sub(r"<think>.*?</think>", "", out, flags=_re.S).strip()
+        return out
+
+    MiniMaxLLM._parse_response = _patched
+    _mem0_patched = True
 
 
 def _get_mem0():
@@ -89,15 +111,39 @@ def _get_mem0():
         return _mem0
     from mem0 import Memory
 
+    _patch_mem0_minimax_think()
+
     cfg = {
+        # 内部记忆抽取/CRUD 用非推理模型，输出干净 JSON（避免 MiniMax-M2 的 <think> 噪声）
         "llm": {
-            "provider": "openai",
+            "provider": "minimax",
             "config": {
-                "model": settings.minimax_model,
-                "openai_base_url": settings.minimax_base_url,
+                "model": settings.mem0_llm_model,
                 "api_key": settings.minimax_api_key,
+                "minimax_base_url": settings.minimax_base_url,
+                "temperature": 0.1,
             },
-        }
+        },
+        # 本地 embedding，不依赖外部 embedding API
+        "embedder": {
+            "provider": "huggingface",
+            "config": {"model": settings.embedding_model},
+        },
+        # 本地向量库
+        "vector_store": {
+            "provider": "chroma",
+            "config": {
+                "collection_name": settings.mem0_collection,
+                "path": settings.mem0_vector_path,
+            },
+        },
+        # 外贸场景定制：保留客户原文语言，聚焦贸易/机电要素
+        "custom_instructions": (
+            "你在为电梯外贸售前客服维护客户长期记忆。"
+            "请用客户原文所用语言记录，事实要简短。"
+            "重点记录：贸易条款偏好(FOB/CIF/DDP)、目的国/港口、机电参数(电压/载重/速度/层站)、"
+            "采购对象(整机或具体组件)、关键历史事件(人工接管/清关纠纷)。忽略寒暄与一次性闲聊。"
+        ),
     }
     _mem0 = Memory.from_config(cfg)
     return _mem0
@@ -105,9 +151,10 @@ def _get_mem0():
 
 def _mem0_search(customer_id: str) -> dict[str, Any]:
     m = _get_mem0()
-    res = m.get_all(user_id=customer_id)
+    # mem0 2.x: 用 filters 传 user_id
+    res = m.get_all(filters={"user_id": customer_id})
     items = res.get("results", res) if isinstance(res, dict) else res
-    facts = [it.get("memory", "") for it in (items or [])]
+    facts = [it.get("memory", "") for it in (items or []) if it.get("memory")]
     return {"facts": facts, "preferences": {}, "params": {}}
 
 
