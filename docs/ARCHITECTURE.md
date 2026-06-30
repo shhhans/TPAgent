@@ -20,14 +20,19 @@
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 大脑（LLM） | **OpenAI 兼容 API**（MiniMax / DashScope 通义千问，二选一） | 代码层统一走 OpenAI 兼容接口，换供应商只改 `base_url` + `model` + `api_key`，不改业务代码 |
+| 大脑（LLM） | **MiniMax**（OpenAI 兼容 API） | `base_url=https://api.minimaxi.com/v1`，默认模型 `MiniMax-M2`（可切 `MiniMax-M3`/`MiniMax-M2.5`）。换供应商只改 `.env` 里的 `base_url+model+key`，不改业务代码 |
 | 编排 | **LangGraph** | 显式状态机（StateGraph），条件边路由，原生 HITL 中断（`interrupt`） |
 | 短期记忆 | **LangGraph Checkpointer** | 单次会话的消息序列 + 临时参数实时持久化（v1 用 SQLite，生产换 Postgres/Redis） |
-| 长期记忆 | **Mem0** | 客户参数表 + 偏好字典的 LLM-based CRUD（合并/覆盖），跨会话召回 |
-| 知识库 | **向量检索 RAG**（v1 纯文本） | 产品规格、FAQ、外贸条款、合规规则。多模态图纸对齐推迟到后期 |
-| 配置 | `.env` + pydantic-settings | 模型 key、Mem0、向量库等集中配置 |
+| 长期记忆 | **Mem0** | 客户参数表 + 偏好字典的 LLM-based CRUD（合并/覆盖），跨会话召回。**v1 即上**；不可用时降级为本地 JSON 存储（接口一致） |
+| 知识库 | **本地向量检索 RAG**（v1 纯文本） | 本地向量库（Chroma），产品规格/FAQ/外贸条款/合规规则。不可用时降级为关键词检索 |
+| Embedding | **本地模型**（默认 Chroma 内置 MiniLM / 可配多语言模型） | 不依赖外部 embedding API，契合"本地向量库"要求 |
+| 配置 | **`.env` + pydantic-settings** | **所有可配置参数统一放 `.env`**（模型、Mem0、向量库、参数 schema 路径、HITL 阈值等），代码不硬编码 |
 
-> 模型抽象：所有 LLM 调用经过一个 `llm/` 适配层（基于 `openai` SDK 的 `OpenAI(base_url=...)`），上层只依赖 `chat(messages, response_format=...)`。未来若要换本地 8B（vLLM/SGLang 也提供 OpenAI 兼容端点），同样只改配置。
+> 模型抽象：所有 LLM 调用经过一个 `llm/` 适配层（基于 `openai` SDK 的 `OpenAI(base_url=...)`），上层只依赖 `chat(messages, response_format=...)`。未来若要换本地 8B（vLLM/SGLang 也提供 OpenAI 兼容端点），同样只改 `.env`。
+
+> **部署形态**：本项目作为**服务**存在，社媒/中台对接由他人负责，v1 **不做对外接口**。先用 **Streamlit 简单可视化**（聊天 + 实时展示 State：意图/已收集参数/缺失参数/召回记忆/风险）跑通核心图，便于联调与演示。
+
+> **配置约束（用户要求）**：凡可配置的参数一律落在 `.env`（见 `.env.example`），通过 `app/config.py` 统一加载，业务代码只读 `settings.xxx`，禁止散落硬编码。
 
 ---
 
@@ -103,8 +108,17 @@ class AgentState(TypedDict):
     risk_flags: list[str]             # 触发 HITL 的原因
 ```
 
-**参数槽（Schema-driven slot filling）** 是售前的核心。报价所需参数由一张配置表定义（产品类目 → 必填参数清单），Triage/Worker1 据此判断 `missing_params`。例如电梯整机：
-`["destination", "voltage", "load_capacity", "floors", "shaft_dimensions", "trade_term"]`
+**参数槽（Schema-driven slot filling）** 是售前的核心，且**采购对象可能是整机，也可能是某个组件**（如曳引机、控制柜、导轨、门机系统）。因此参数 schema **以 ETIM / ECLASS 行业分类标准为驱动**：
+
+1. 先识别客户询问的**对象所属分类**（ETIM class 或 ECLASS class，如 ETIM `EC...` 类目）。
+2. 该分类在标准里有一组**已定义的特征/属性（features/properties）**，即"这个组件报价该问哪些参数"。
+3. `missing_params` = 该分类必填特征中尚未填充的部分；`collected_params` 用标准特征编码做 key，避免自由发挥。
+
+> v1 实现：`app/tools/params.py` 维护一份**分类→必填特征**的映射（可从 ETIM/ECLASS 拉取/缓存为本地 JSON，路径由 `.env` 配置）。未来可接入 ETIM/ECLASS 官方数据源在线拉取。
+>
+> 示例（电梯整机 + 曳引机组件，占位，待业务方/标准核准）：
+> - 整机：`destination, voltage, load_capacity, floors, shaft_dimensions, trade_term`
+> - 曳引机（组件）：`rated_load, rated_speed, voltage, traction_ratio, motor_power`
 
 ---
 
@@ -190,15 +204,29 @@ Supervisor 自身**无业务 API**，只做"交警"。子 Agent 若返回 `{"sta
 ### 8.1 短期（Thread-Level）
 LangGraph Checkpointer 持久化单次会话的 `messages` + `collected_params`。会话结束清理上下文，但参数已固化前不丢。
 
-### 8.2 长期（Mem0，v1 上）
-- **写入**：会话空闲（约 20~40s）后**异步**触发"记忆固化 Worker"：用 LLM 把多轮历史清洗压缩成高纯度事实（如"偏好 DDP 条款""目的港 Dubai""上次询 Elevator_X"），交 Mem0 做 LLM-based CRUD（自动合并/覆盖旧记忆）。
-- **读取**：Triage 阶段 `mem_search(customer_id)` 召回偏好/历史参数，注入 `State.customer_memory` 与 Prompt，复访秒级唤起上下文。
-- **分类**（Mem0 内以 metadata 区分，不引入第二套系统）：
-  - 语义记忆：客户偏好、固定参数（电压制式、贸易条款偏好）
-  - 情景记忆：关键历史节点（人工接管、清关延误纠纷）—— v1 以事实条目记录；若后续需要强时序"前因后果"溯源，再评估引入 Zep 时序图谱。
-- **程序记忆**：风险对冲规范、合规流程 —— **不进 Mem0**，作为静态系统级 Prompt/RAG 每次注入（不可被对话篡改）。
+### 8.2 长期（Mem0，v1 已落地）
+- **写入**：会话结束（设计上为空闲 20~40s 异步）触发"记忆固化"：Mem0 用 LLM 把多轮历史清洗压缩成高纯度事实，做 LLM-based CRUD（自动合并/覆盖旧记忆）。
+- **读取**：Triage 入口前的 `load_memory` 节点 `mem_search(customer_id)` 召回，注入 `State.customer_memory` 与 Prompt，复访即唤起上下文。
+- **程序记忆**：风险对冲规范、合规流程 —— **不进 Mem0**，作为静态系统级 Prompt 每次注入（`PROCEDURAL_RULES`，不可被对话篡改）。
+- **情景记忆**：关键历史节点（人工接管、清关纠纷）v1 以事实条目记录；强时序"前因后果"溯源需求出现后再评估引入 Zep。
 
 > 决策记录：v1 **只用 Mem0 一套**长期记忆；Zep（时序图谱）列入后期可选，避免开局背两套数据一致性 + 故障面。
+
+#### Mem0 接入实现要点（`app/memory/mem0_store.py`）
+全本地化，不依赖外部 embedding API：
+
+| 组件 | 选型 | 说明 |
+|---|---|---|
+| 记忆抽取 LLM | MiniMax（`mem0` 原生 `minimax` provider，默认 `MiniMax-M2`） | 需支持 `json_object`；`MiniMax-M2` 是推理模型会输出 `<think>`，已对 mem0 的 `MiniMaxLLM._parse_response` **打补丁剥离 think**，否则会破坏 mem0 的 JSON 解析 |
+| Embedding | 本地 `sentence-transformers`（`huggingface` provider，多语言 MiniLM，384 维） | 首次运行从 HF Hub 下载模型；无需 embedding API |
+| 向量库 | 本地 **Chroma**（持久化到 `data/mem0_chroma`） | 与 RAG 同栈 |
+| 定制 | `custom_instructions` | 保留客户原文语言、聚焦贸易条款/机电参数/采购对象/关键事件 |
+
+注意点（已踩坑修正）：
+- MiniMax 的 embeddings 接口**非 OpenAI 兼容**（需 GroupId + 私有协议），故 embedding 走本地模型。
+- mem0 2.x 的 `get_all` 必须用 `filters={"user_id": ...}`，不能用顶层 `user_id=`。
+- 任一环节异常 → `search()` 返回空记忆、`finalize()` 降级本地 JSON，**不阻断主流程**。
+- 切回无依赖模式：`.env` 设 `MEMORY_BACKEND=json` 即可。
 
 ---
 
@@ -262,11 +290,14 @@ TPAgent/
 
 ---
 
-## 12. 待你确认 / 开放问题
+## 12. 已确认的决策
 
-1. **模型供应商**：MiniMax 还是 DashScope(通义千问) 先接？（代码两者皆可，只是先填哪个 key 跑 demo）
-2. **向量库**：v1 用本地（Chroma/FAISS）还是已有的（如 Milvus/PGVector）？
-3. **产品参数 schema**：电梯整机的"报价必填参数"清单，需要业务方给一版准确的（本文档先用占位）。
-4. **入口对接**：v1 先做"传入文本→出回复"的核心图，还是同时要对接某个真实社媒/中台的 webhook？
+1. **模型供应商**：✅ **MiniMax**（环境已配 `MINIMAX_API_KEY`），`base_url=https://api.minimaxi.com/v1`，默认 `MiniMax-M2`。
+2. **向量库**：✅ **本地**（Chroma；不可用时降级关键词检索）。
+3. **参数 schema**：✅ 由 **ETIM / ECLASS** 分类标准驱动；采购对象可为**整机或组件**。v1 用本地 JSON 映射占位，待接标准数据源。
+4. **部署形态**：✅ 作为**服务**，v1 **不做对外接口**；先 **Streamlit 可视化**跑通核心图，对接由他人负责。
+5. **配置**：✅ 所有可配置参数统一放 `.env`。
 
-> 文档先到这里，达成共识后再进入编码（按 §11 目录搭骨架）。
+### 仍需业务方提供（不阻塞 v1 骨架）
+- 电梯整机及各**组件**对应的 ETIM/ECLASS **分类编码**与**必填特征清单**（当前为占位）。
+- 知识库初始语料（产品规格、FAQ、外贸条款、合规红线）。
