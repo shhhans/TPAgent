@@ -1,0 +1,19 @@
+# env & secrets
+.env
+.env.local
+
+# data artifacts (本地生成)
+data/chroma/
+data/checkpoints.sqlite
+data/memory_store.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# os
+.DS_Store

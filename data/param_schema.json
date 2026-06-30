@@ -1,0 +1,41 @@
+{
+  "_note": "ETIM/ECLASS 驱动的报价参数 schema 占位版。后续可替换为从 ETIM/ECLASS 数据源拉取并缓存的结果。required 为该分类报价必填特征。",
+  "classes": {
+    "elevator_complete": {
+      "label": "电梯整机",
+      "etim_class": "EC010101 (占位)",
+      "required": ["destination", "voltage", "load_capacity", "floors", "shaft_dimensions", "trade_term"]
+    },
+    "traction_machine": {
+      "label": "曳引机（组件）",
+      "etim_class": "EC0xxxxx (占位)",
+      "required": ["rated_load", "rated_speed", "voltage", "traction_ratio", "motor_power"]
+    },
+    "control_cabinet": {
+      "label": "控制柜（组件）",
+      "etim_class": "EC0xxxxx (占位)",
+      "required": ["voltage", "control_type", "floors", "rated_speed"]
+    },
+    "door_system": {
+      "label": "门机系统（组件）",
+      "etim_class": "EC0xxxxx (占位)",
+      "required": ["door_type", "door_width", "voltage", "opening_style"]
+    }
+  },
+  "param_labels": {
+    "destination": "目的国/港口",
+    "voltage": "电压/电压制式 (V/Hz/相)",
+    "load_capacity": "额定载重 (kg)",
+    "rated_load": "额定载重 (kg)",
+    "floors": "停靠层站数",
+    "shaft_dimensions": "井道尺寸 (mm)",
+    "trade_term": "贸易条款 (FOB/CIF/DDP...)",
+    "rated_speed": "额定速度 (m/s)",
+    "traction_ratio": "曳引比 (如 2:1)",
+    "motor_power": "电机功率 (kW)",
+    "control_type": "控制方式 (集选/并联/群控)",
+    "door_type": "门类型 (中分/旁开)",
+    "door_width": "开门宽度 (mm)",
+    "opening_style": "开门方式"
+  }
+}
