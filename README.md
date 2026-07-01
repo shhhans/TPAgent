@@ -39,6 +39,9 @@ python -m app.cli
 
 # 3b) Streamlit 可视化（聊天 + 实时 State 面板）
 streamlit run app/ui/streamlit_app.py
+
+# 3c) 仿真评测（LLM 仿真客户 ↔ Agent 多轮对打 + 判分）
+MEMORY_BACKEND=json VECTOR_BACKEND=keyword python -m app.eval.run_eval --seeds 1-10
 ```
 
 ## 目录结构
@@ -55,11 +58,13 @@ app/
 ├── memory/mem0_store.py # 长期记忆（Mem0 + JSON 降级）
 ├── rag/retriever.py     # 本地向量检索（Chroma + 关键词降级）
 ├── tools/params.py      # ETIM/ECLASS 参数槽
-└── ui/streamlit_app.py  # 可视化
+├── ui/streamlit_app.py  # 可视化
+└── eval/                # 仿真评测：personas / sim_customer / harness / judges / run_eval
 data/
 ├── kb/                  # 知识库语料（占位）
 └── param_schema.json    # ETIM/ECLASS 参数 schema（占位）
 docs/ARCHITECTURE.md     # 完整设计文档
+docs/EVAL.md             # 仿真评测层说明
 ```
 
 完整设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
