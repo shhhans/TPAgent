@@ -49,8 +49,9 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     recall = round(tp / (tp + fn), 3) if (tp + fn) else None
 
     lang_checked = [x["language_ok"] for x in rules if x["language_ok"] is not None]
+    nat = [r["naturalness"] for r in rows if "naturalness" in r]
 
-    return {
+    agg = {
         "n": len(rows),
         "avg_completeness": _mean([x["completeness"] for x in rules]),
         "avg_correctness": _mean([x["correctness"] for x in rules]),
@@ -61,24 +62,40 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "language_match": _mean([1.0 if ok else 0.0 for ok in lang_checked]) if lang_checked else None,
         "over_collection_rate": _mean([1.0 if x["extra_params"] else 0.0 for x in rules]),
         "avg_turns": _mean([float(x["turns"]) for x in rules]),
+        # 确定性自然度（免费，总是有）
+        "avg_ai_tone_penalty": _mean([n["avg_ai_tone_penalty"] for n in nat]) if nat else None,
+        "avg_markdown_density": _mean([n["avg_markdown_density"] for n in nat]) if nat else None,
+        "meta_leak_total": sum(n["meta_leak_count"] for n in nat) if nat else 0,
     }
+    # LLM 主观判分（可选）
+    llm = [r["llm"] for r in rows if r.get("llm") and "llm_error" not in r["llm"]]
+    if llm:
+        agg["avg_naturalness_overall"] = _mean(
+            [l["naturalness_overall"] for l in llm if l.get("naturalness_overall") is not None]
+        )
+        agg["verdict_natural_rate"] = _mean([1.0 if l.get("verdict_natural") else 0.0 for l in llm])
+    return agg
 
 
 def print_report(rows: list[dict[str, Any]], agg: dict[str, Any]) -> None:
     print("\n" + "=" * 96)
-    print(f"{'seed':>4} {'compl':>6} {'corr':>6} {'cls':>4} {'risk':>5} {'lang':>5} {'xtra':>4} {'turns':>5}  persona")
-    print("-" * 96)
+    print(f"{'seed':>4} {'compl':>6} {'corr':>6} {'cls':>4} {'risk':>5} {'lang':>5} {'xtra':>4} "
+          f"{'aitone':>6} {'meta':>4} {'turns':>5}  persona")
+    print("-" * 108)
     for r in rows:
         x = r["rules"]
+        n = r.get("naturalness", {})
         cls = "✓" if x["product_class_ok"] else "✗"
         risk = "✓" if x["risk_ok"] else "✗"
         lang = "-" if x["language_ok"] is None else ("✓" if x["language_ok"] else "✗")
         xtra = str(len(x["extra_params"]))
+        aitone = n.get("avg_ai_tone_penalty", 0.0)
+        meta = str(n.get("meta_leak_count", 0))
         print(
             f"{r['seed']:>4} {x['completeness']:>6.2f} {x['correctness']:>6.2f} "
-            f"{cls:>4} {risk:>5} {lang:>5} {xtra:>4} {x['turns']:>5}  {r['persona']}"
+            f"{cls:>4} {risk:>5} {lang:>5} {xtra:>4} {aitone:>6.2f} {meta:>4} {x['turns']:>5}  {r['persona']}"
         )
-    print("-" * 96)
+    print("-" * 108)
     print(
         f"n={agg['n']}  完整率={agg['avg_completeness']}  正确率={agg['avg_correctness']}  "
         f"分类准确={agg['product_class_acc']}  风险路由准确={agg['risk_routing_acc']} "
@@ -87,7 +104,15 @@ def print_report(rows: list[dict[str, Any]], agg: dict[str, Any]) -> None:
     print(
         f"语言匹配={agg['language_match']}  超纲收集率={agg['over_collection_rate']}  平均轮数={agg['avg_turns']}"
     )
-    print("=" * 96 + "\n")
+    print(
+        f"[自然度·规则] AI味惩罚={agg['avg_ai_tone_penalty']}  Markdown密度={agg['avg_markdown_density']}  "
+        f"思维泄漏总数={agg['meta_leak_total']}"
+    )
+    if "avg_naturalness_overall" in agg:
+        print(
+            f"[自然度·LLM] 综合(1-3)={agg['avg_naturalness_overall']}  像真人比率={agg['verdict_natural_rate']}"
+        )
+    print("=" * 108 + "\n")
 
 
 def main() -> None:
