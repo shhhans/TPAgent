@@ -33,10 +33,14 @@ def chat(
     temperature: float | None = None,
     max_tokens: int | None = None,
     json_mode: bool = False,
+    model: str | None = None,
 ) -> str:
-    """返回模型文本输出。json_mode=True 时请求结构化 JSON。"""
+    """返回模型文本输出。json_mode=True 时请求结构化 JSON。
+
+    model 可覆盖默认 minimax_model（评测裁判用异构模型消除自我偏好时用得上）。
+    """
     kwargs: dict[str, Any] = {
-        "model": settings.minimax_model,
+        "model": model or settings.minimax_model,
         "messages": messages,
         "temperature": settings.llm_temperature if temperature is None else temperature,
         "max_tokens": settings.llm_max_tokens if max_tokens is None else max_tokens,
@@ -79,11 +83,12 @@ def chat_json(
     *,
     temperature: float | None = None,
     retries: int = 1,
+    model: str | None = None,
 ) -> dict:
     """要求模型输出 JSON 并解析为 dict；解析失败重试 retries 次。"""
     last_err: Exception | None = None
     for attempt in range(retries + 1):
-        raw = chat(messages, temperature=temperature, json_mode=True)
+        raw = chat(messages, temperature=temperature, json_mode=True, model=model)
         try:
             return _extract_json(raw)
         except ValueError as e:
