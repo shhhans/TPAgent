@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # ---- HITL ----
     hitl_high_value_amount: float = 50000
 
+    # ---- 仿真评测 ----
+    eval_max_turns: int = 12          # 单条画像仿真对话最大轮数
+    eval_sim_temperature: float = 0.8  # 仿真客户温度（高一些更像真人/更多样）
+    eval_llm_judge: bool = False       # 是否默认开启 LLM 主观判分
+
     # ---- 杂项 ----
     log_level: str = "INFO"
 

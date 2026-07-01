@@ -7,6 +7,7 @@ data/chroma/
 data/mem0_chroma/
 data/checkpoints.sqlite
 data/memory_store.json
+data/eval_report*.json
 
 # python
 __pycache__/
