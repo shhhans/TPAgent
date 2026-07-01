@@ -19,14 +19,16 @@
 - 金标集切 **calibration / holdout** 两份，防止把裁判过拟合到那几条真人对话。
 - 复用 `judges.judge_pairwise()` + `validate_judge.run_position_swap()`（已支持 AB 交换）。
 
-## 2. 异构裁判 / 多模型陪审团（Jury, Majority Vote）　⭐⭐⭐
-**做什么**：用 ≥2 个不同架构的模型（如 GPT-4o / Claude / Qwen）各判一次，取多数表决或均值。
-**为什么**：不同模型偏见不同（GPT 易接受推测、Mistral/Llama 重客观证据），投票中和单点偏见；
-更关键——**我们大脑与默认裁判都是 MiniMax**，等于"自己判自己"，文献证明裁判会偏袒**低困惑度**
-文本（即平庸八股），这正是自然度评测的头号敌人。
-**阻塞前提**：需要第二个异构模型的 API key（当前只有 MiniMax）。
-**落地建议**：`config.EVAL_JUDGE_MODEL` 钩子已就位——填异构模型即可让裁判≠生成模型；
-陪审团则在 `score_llm` 外套一层多模型循环 + 投票聚合。
+## 2. 异构裁判 / 多模型陪审团（Jury, Majority Vote）　✅ 已就绪（配 key 即启用）
+**做什么**：用 ≥2 个不同架构的模型各判一次，取多数表决（二元）/ 均值（1-3 分）。
+**为什么**：不同模型偏见不同，投票中和单点偏见；更关键——**我们大脑与默认裁判都是 MiniMax**，
+等于"自己判自己"，文献证明裁判会偏袒**低困惑度**文本（即平庸八股），是自然度评测的头号敌人。
+**已落地**：`client.py` 支持多供应商（minimax + dashscope/Qwen，OpenAI 兼容）；
+`judges._jury_members()` + `score_llm` 已实现多成员判分与聚合，未配 key 时优雅回退单裁判。
+- 只想**换裁判**（治本消自我偏好）：`.env` 设 `DASHSCOPE_API_KEY` + `EVAL_JUDGE_PROVIDER=dashscope`。
+- 想**陪审团**（MiniMax+Qwen 各判再投票）：设 `DASHSCOPE_API_KEY` + `EVAL_JURY=true`。
+- 用 `python -m app.eval.validate_judge --provider dashscope` 先对 Qwen 裁判跑 MVVP 验收。
+**待办**：用户提供 `DASHSCOPE_API_KEY` 后端到端实测；未来可再加第 3 家（GPT/Claude）扩为 3 席陪审团。
 
 ## 3. G-EVAL：Token 概率加权连续打分　⭐（当前**被阻塞**）
 **做什么**：不取离散整数分，而是提取输出分数 token 的概率做加权求和，得到连续、低平局的分数。
@@ -68,6 +70,6 @@
 | 前提 | 现状 | 卡住的项 |
 |---|---|---|
 | 真人售前对话语料 | **缺** | #1 校准、#8 红线基线 |
-| 第二个异构模型 key | **缺**（仅 MiniMax） | #2 陪审团、#3 换裁判 |
+| 第二个异构模型 key | **待用户提供 DASHSCOPE_API_KEY**（基础设施已就绪） | #2 陪审团/换裁判（配 key 即启用） |
 | 裁判 logprobs | **不支持**（MiniMax 实测忽略） | #3 G-EVAL |
 | 线上流量 | 无 | #5 众包盲测 |

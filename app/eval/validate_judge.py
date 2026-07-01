@@ -66,10 +66,10 @@ def _raw_match(a: list[Any], b: list[Any]) -> float:
     return round(sum(1 for x, y in pairs if x == y) / len(pairs), 3) if pairs else 0.0
 
 
-def run_pointwise(items: list[dict[str, Any]]) -> dict[str, Any]:
+def run_pointwise(items: list[dict[str, Any]], provider: str | None = None, model: str | None = None) -> dict[str, Any]:
     """逐条二元判定 vs 金标签：报原始匹配率、κ、注水差(Kappa deflation)。"""
     gold = [bool(it["natural"]) for it in items]
-    pred = [judges.judge_natural_binary(it["text"], it.get("lang", "English")) for it in items]
+    pred = [judges.judge_natural_binary(it["text"], it.get("lang", "English"), provider, model) for it in items]
     raw = _raw_match(gold, pred)
     kappa = cohen_kappa(gold, pred)
     deflation = round((raw - kappa) * 100, 1) if kappa is not None else None
@@ -77,7 +77,7 @@ def run_pointwise(items: list[dict[str, Any]]) -> dict[str, Any]:
             "gold": gold, "pred": pred}
 
 
-def run_position_swap(items: list[dict[str, Any]]) -> dict[str, Any]:
+def run_position_swap(items: list[dict[str, Any]], provider: str | None = None, model: str | None = None) -> dict[str, Any]:
     """AB 位置交换探位置偏见：对每个 (natural, ai) 配对跑两种顺序。
 
     - 无偏理想：内容一致地选中"更自然"那条，与位置无关。
@@ -90,8 +90,8 @@ def run_position_swap(items: list[dict[str, Any]]) -> dict[str, Any]:
     pos_a_wins = 0
     total = 0
     for good, bad in pairs:
-        w1 = judges.judge_pairwise(good["text"], bad["text"], good.get("lang", "English"))  # good=A
-        w2 = judges.judge_pairwise(bad["text"], good["text"], good.get("lang", "English"))  # good=B
+        w1 = judges.judge_pairwise(good["text"], bad["text"], good.get("lang", "English"), provider, model)  # good=A
+        w2 = judges.judge_pairwise(bad["text"], good["text"], good.get("lang", "English"), provider, model)  # good=B
         if w1 is None or w2 is None:
             continue
         total += 1
@@ -109,7 +109,7 @@ def run_position_swap(items: list[dict[str, Any]]) -> dict[str, Any]:
             "position_bias": None if position_a_rate is None else round(abs(position_a_rate - 0.5) * 2, 3)}
 
 
-def cross_validate(items: list[dict[str, Any]]) -> dict[str, Any]:
+def cross_validate(items: list[dict[str, Any]], provider: str | None = None, model: str | None = None) -> dict[str, Any]:
     """在不同 group（标签分布不同）子集上分别报 κ。"""
     groups: dict[str, list[dict]] = {}
     for it in items:
@@ -117,7 +117,7 @@ def cross_validate(items: list[dict[str, Any]]) -> dict[str, Any]:
     out = {}
     for g, sub in groups.items():
         gold = [bool(it["natural"]) for it in sub]
-        pred = [judges.judge_natural_binary(it["text"], it.get("lang", "English")) for it in sub]
+        pred = [judges.judge_natural_binary(it["text"], it.get("lang", "English"), provider, model) for it in sub]
         out[g] = {"n": len(sub), "raw_match": _raw_match(gold, pred), "cohen_kappa": cohen_kappa(gold, pred)}
     return out
 
@@ -138,25 +138,28 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="MVVP：LLM 裁判上岗前验收")
     ap.add_argument("--labeled", default=None, help="标注 JSONL 路径（缺省用内置演示集）")
     ap.add_argument("--skip-swap", action="store_true", help="跳过位置交换探测（省 API）")
+    ap.add_argument("--provider", default=None, help="验收哪个裁判供应商（minimax|dashscope），缺省用主成员")
+    ap.add_argument("--model", default=None, help="裁判模型覆盖")
     args = ap.parse_args()
 
     items = load_items(args.labeled)
     src = args.labeled or "内置演示集"
-    print(f"MVVP 验收 · 数据={src} · 样本={len(items)}\n")
+    judge_desc = args.provider or "(主成员)"
+    print(f"MVVP 验收 · 数据={src} · 样本={len(items)} · 裁判={judge_desc} {args.model or ''}\n")
 
-    pw = run_pointwise(items)
+    pw = run_pointwise(items, args.provider, args.model)
     print("① 逐条二元判定 vs 金标签")
     print(f"   原始匹配率 raw_match = {pw['raw_match']}")
     print(f"   校正一致度 Cohen's κ = {pw['cohen_kappa']}   （κ<0.6 慎用，<0.4 不可用）")
     print(f"   注水差 kappa_deflation = {pw['kappa_deflation_pts']} 个百分点（原始匹配率虚高幅度）\n")
 
     print("③ 交叉验证（不同标签分布子集）")
-    for g, r in cross_validate(items).items():
+    for g, r in cross_validate(items, args.provider, args.model).items():
         print(f"   [{g:>6}] n={r['n']}  raw={r['raw_match']}  κ={r['cohen_kappa']}")
     print()
 
     if not args.skip_swap:
-        sw = run_position_swap(items)
+        sw = run_position_swap(items, args.provider, args.model)
         print("② AB 位置交换（位置偏见）")
         print(f"   顺序一致率 order_agreement = {sw['order_agreement']}   （越高越好，理想=1.0）")
         print(f"   选 A 位比率 position_A_rate = {sw['position_A_rate']}   （理想≈0.5）")

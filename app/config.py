@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
 
+    # ---- 第二供应商：DashScope / Qwen（OpenAI 兼容）——评测异构裁判用 ----
+    dashscope_api_key: str = ""
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
     # ---- 向量库 / RAG ----
     vector_backend: str = "chroma"  # chroma | keyword
     chroma_persist_dir: str = "./data/chroma"
@@ -48,9 +52,14 @@ class Settings(BaseSettings):
     eval_max_turns: int = 12           # 单条画像仿真对话最大轮数
     eval_sim_temperature: float = 0.8  # 仿真客户温度（高一些更像真人/更多样）
     eval_llm_judge: bool = False       # 是否默认开启 LLM 主观判分
-    # 裁判模型：留空则复用 minimax_model。设为异构模型可消除"自己判自己"的自我偏好。
-    eval_judge_model: str = ""
     eval_max_reply_chars: int = 600    # 单条客服回复超过此长度记为冗长（自然度惩罚）
+    # 裁判(主成员)供应商与模型：留空则用 minimax + minimax_model。
+    # 设 eval_judge_provider=dashscope 可让裁判≠生成模型，消除"自己判自己"的自我偏好。
+    eval_judge_provider: str = ""
+    eval_judge_model: str = ""
+    # 陪审团：开启后，若第二供应商(DashScope)key 就绪，则多模型各判一次再投票/取均值。
+    eval_jury: bool = False
+    eval_dashscope_judge_model: str = "qwen-plus"
 
     # ---- 杂项 ----
     log_level: str = "INFO"

@@ -86,7 +86,13 @@ python -m app.eval.run_eval --seeds 1-20 --out data/eval_report.json
 ```
 
 配置项（`.env`）：`EVAL_MAX_TURNS`、`EVAL_SIM_TEMPERATURE`、`EVAL_LLM_JUDGE`、
-`EVAL_JUDGE_MODEL`（裁判模型，留空复用大脑模型）、`EVAL_MAX_REPLY_CHARS`（冗长阈值）。
+`EVAL_MAX_REPLY_CHARS`（冗长阈值）。
+
+**异构裁判 / 陪审团**（消除"MiniMax 自己判自己"的自我偏好；配 `DASHSCOPE_API_KEY` 即启用）：
+- 换裁判：`EVAL_JUDGE_PROVIDER=dashscope`（裁判用 Qwen，≠ 生成模型）。
+- 陪审团：`EVAL_JURY=true`（MiniMax + Qwen 各判一次，二元多数票 / 分值取均值，保留每席明细）。
+- 先验收再信任：`python -m app.eval.validate_judge --provider dashscope` 对 Qwen 裁判跑 MVVP。
+未配 key 时自动回退单 MiniMax 裁判，不影响运行。
 
 ## 已知边界
 
